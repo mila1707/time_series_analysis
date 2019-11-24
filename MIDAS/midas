@@ -1,0 +1,93 @@
+#!/bin/csh -f
+# Compute variant of Theil-Sen estimate of velocity from tenv file
+
+if ( ! $# ) then
+help:
+   echo "Usage:   midas [-d] [-s step_file] tseries.tenv | freeform.tenu"
+   echo "          where input file tseries.tenv is in tenv2 format"
+   echo "       or: freeform.tenu is in free format: station, t, e, n, u"
+   echo "Purpose: Compute modified Theil-Sen estimate of velocity."
+   echo "         - sample slopes between points seperated by precisely 1 year"
+   echo "         Wrapper around midas.e"
+   echo "Options:  -d  runs development version midas.dev.e"
+   echo "          -s  use step_file"
+   echo "Step file (free) format example:"
+   echo "  RENO 2000.0000 (may have extra columns which will be copied)"
+   echo "  RENO 2004.0000"
+   echo "  ZUMA 2004.0000"
+   echo "Output Files:"
+   echo "tseries.vel   single line record with velocity solution"
+   echo "tseries.renv  Residuals in tenv2 format, if input is .tenv"
+   echo "tseries.renu  Residuals in free format, if input is .tenu"
+   echo "tseries.step  steps matching station STID within span of data"
+   exit 1
+endif
+while ( $# )
+  if ( "$1" == "-d" ) then
+    echo "MIDAS development version"
+    set dev
+    shift
+  else if ( "$1" == "-s" ) then
+     shift
+     set stepfile = "$1"
+     shift
+     if ( ! -r $stepfile ) goto help
+  else 
+     if( "$#" != 1 ) goto help
+     set filein = "$1"
+     shift
+     if ( ! -r $filein ) goto help
+  endif  
+end
+
+set fileout = "$filein:r"
+set err = "MIDAS.ERR"
+if ( "$filein:e" == "tenv") then
+  set input  = "MIDAS.TENV"
+  set output = "MIDAS.RENV"
+  set outend = "renv"
+else
+  set input  = "MIDAS.TENU"
+  set output = "MIDAS.RENU"
+  set outend = "renu"
+endif
+
+rm -rf MIDAS.STEPIN MIDAS.STEPOUT MIDAS.ERR MIDAS.TENV MIDAS.RENV MIDAS.TENU MIDAS.RENU MIDAS.VEL
+
+ln -s $filein $input
+if ( $?stepfile ) then
+#    ln -s $stepfile MIDAS.STEPIN
+     set sta = "`head -n1 $input | cut -c4`"
+     grep $sta $stepfile > MIDAS.STEPIN
+endif
+
+if ( $?dev ) then
+   midas.dev.e | tee MIDAS.VEL
+   if ( $status ) set error
+else
+   midas.e | tee MIDAS.VEL
+   if ( $status ) set error
+endif
+
+if ( $?error ) then
+  echo "FATAL ERROR in midas.e"
+  mv MIDAS.ERR $fileout.err
+  goto cleanup
+endif
+
+if ( ! -e MIDAS.VEL || ! -e $output ) then
+  echo "FATAL ERROR: Missing output file"
+  mv MIDAS.ERR $fileout.err
+  set error
+  goto cleanup
+endif
+
+if ( ! -z MIDAS.ERR ) mv MIDAS.ERR $fileout.err 
+mv MIDAS.VEL $fileout.vel
+mv $output $fileout.$outend
+
+if ( -e MIDAS.STEPOUT && ! -z MIDAS.STEPOUT ) mv MIDAS.STEPOUT $fileout.step
+
+cleanup:
+rm -rf $input $err MIDAS.STEPIN MIDAS.STEPOUT
+if ( $?error ) exit 1
